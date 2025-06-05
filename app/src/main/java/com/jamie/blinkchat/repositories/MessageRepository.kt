@@ -2,6 +2,7 @@ package com.jamie.blinkchat.repositories
 
 import com.jamie.blinkchat.core.common.Resource
 import com.jamie.blinkchat.domain.model.Message
+import com.jamie.blinkchat.domain.model.TypingIndicatorEvent
 import kotlinx.coroutines.flow.Flow
 
 interface MessageRepository {
@@ -73,6 +74,14 @@ interface MessageRepository {
      */
     suspend fun sendTypingIndicator(chatId: String, isTyping: Boolean)
 
-    // Optional: A flow to observe typing indicators from other users in a chat
-    // fun observeTypingIndicators(chatId: String): Flow<TypingIndicatorEvent>
+    /**
+     * Observes typing indicator events for a specific chat.
+     * Emits events only for the given chatId and filters out events from the current user.
+     *
+     * @param chatId The ID of the chat to observe typing indicators for.
+     * @return A Flow emitting [TypingIndicatorEvent] for other users in the chat.
+     */
+
+    fun observeTypingIndicators(chatId: String): Flow<TypingIndicatorEvent>
+
 }

@@ -26,14 +26,14 @@ import androidx.room.PrimaryKey
 )
 data class MessageEntity(
     @PrimaryKey val id: String, // Server-generated UUID (or clientTempId initially)
-    val chatId: String, // UUID of the chat this message belongs to
-    val senderId: String, // UUID of the sender
-    val receiverId: String?, // UUID of the receiver (useful for 1:1 chats if not directly in ChatEntity)
+    val chatId: String,
+    val senderId: String,
+    val receiverId: String?,
     val content: String,
-    val timestamp: Long, // Epoch milliseconds, for sorting and display
+    val timestamp: Long,
     var status: String, // "sending", "sent", "delivered", "read", "failed"
-    val clientTempId: String? = null, // Client-generated temporary ID for optimistic updates and ACK matching
-    val isOptimistic: Boolean = false // Flag to indicate if this is an optimistic update not yet confirmed by server
+    val clientTempId: String? = null, // Key for identifying unsent messages
+    val isOptimistic: Boolean = false // Another key indicator
 ) {
     companion object {
         const val STATUS_SENDING = "sending"

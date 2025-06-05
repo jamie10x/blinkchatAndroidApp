@@ -7,6 +7,6 @@ data class MessageUseCases @Inject constructor(
     val sendMessage: SendMessageUseCase,
     val loadOlderMessages: LoadOlderMessagesUseCase,
     val updateMessageStatus: UpdateMessageStatusUseCase,
-    val sendTypingIndicator: SendTypingIndicatorUseCase
-    // Add use case for observing typing indicators here if implemented
+    val sendTypingIndicator: SendTypingIndicatorUseCase,
+    val observeTypingIndicator: ObserveTypingIndicatorUseCase
 )
