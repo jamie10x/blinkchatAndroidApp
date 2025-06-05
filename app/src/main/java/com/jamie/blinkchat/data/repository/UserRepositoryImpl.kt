@@ -32,131 +32,116 @@ class UserRepositoryImpl @Inject constructor(
 
     override fun searchUsers(searchTerm: String): Flow<Resource<List<User>>> = flow {
         emit(Resource.Loading())
+        Timber.d("UserRepo: searchUsers called. SearchTerm: '$searchTerm'")
         if (searchTerm.isBlank()) {
+            Timber.d("UserRepo: SearchTerm is blank, emitting Success with empty list.")
             emit(Resource.Success(emptyList()))
             return@flow
         }
         try {
-            val response = userApiService.searchUsers(searchTerm.trim())
+            val trimmedSearchTerm = searchTerm.trim()
+            Timber.d("UserRepo: Calling UserApiService.searchUsers with trimmed searchTerm: '$trimmedSearchTerm'")
+            val response = userApiService.searchUsers(trimmedSearchTerm)
+            Timber.i("UserRepo: API Raw Response for searchUsers: Code=${response.code()}, IsSuccessful=${response.isSuccessful}, Message=${response.message()}, Body=${response.body()?.joinToString { it.username }}, ErrorBody=${response.errorBody()?.string()}")
+            // Note: Reading errorBody consumes it. For logging, use a peek method or duplicate if needed for parsing.
+            // For simplicity, the HttpLoggingInterceptor should capture the full error body.
+
             if (response.isSuccessful && response.body() != null) {
                 val userDtos = response.body()!!
-                // Save/update fetched users in local DB for consistency and potential offline use
-                val userEntities = userDtos.map { it.toEntity() }
-                userDao.insertUsers(userEntities) // Uses OnConflictStrategy.REPLACE
-
+                Timber.d("UserRepo: API searchUsers success. DTOs count: ${userDtos.size}")
+                if (userDtos.isNotEmpty()) {
+                    val userEntities = userDtos.map { it.toEntity() }
+                    userDao.insertUsers(userEntities)
+                    Timber.d("UserRepo: Saved/Updated ${userEntities.size} users to local DB.")
+                }
                 val domainUsers = userDtos.map { it.toDomain() }
                 emit(Resource.Success(domainUsers))
             } else {
-                val error = parseError<List<PublicUserDto>>(response.code(), response.errorBody()?.string())
-                emit(Resource.Error(error.message ?: "User search failed", errorCode = error.errorCode))
+                // Re-read error body if it was consumed above, or rely on HttpLoggingInterceptor for full detail
+                val errorBodyString = response.errorBody()?.string() ?: "Unknown error structure"
+                Timber.w("UserRepo: API searchUsers error. Code: ${response.code()}, ErrorBody: $errorBodyString")
+                val errorResource = parseError<List<User>>(response.code(), errorBodyString) // Ensure parseError can handle List<User> or its DTO type
+                emit(Resource.Error(errorResource.message ?: "User search failed (API error)", errorCode = errorResource.errorCode))
             }
         } catch (e: HttpException) {
-            Timber.e(e, "HttpException during user search")
-            val error = parseError<List<PublicUserDto>>(e.code(), e.response()?.errorBody()?.string())
-            emit(Resource.Error(error.message ?: "User search HTTP error", errorCode = error.errorCode))
+            Timber.e(e, "UserRepo: HttpException during user search. Code: ${e.code()}, Message: ${e.message()}")
+            val errorResource = parseError<List<User>>(e.code(), e.response()?.errorBody()?.string())
+            emit(Resource.Error(errorResource.message ?: "User search HTTP error", errorCode = errorResource.errorCode))
         } catch (e: IOException) {
-            Timber.e(e, "IOException during user search (network issue)")
+            Timber.e(e, "UserRepo: IOException during user search (network issue)")
             emit(Resource.Error("Network error during user search. Please check connection."))
         } catch (e: Exception) {
-            Timber.e(e, "Unexpected error during user search")
+            Timber.e(e, "UserRepo: Unexpected error during user search")
             emit(Resource.Error("An unexpected error occurred: ${e.localizedMessage}"))
         }
     }.flowOn(Dispatchers.IO)
 
-
     override fun getUserById(userId: String, forceNetworkFetch: Boolean): Flow<Resource<out User>> = channelFlow {
-        send(Resource.Loading()) // Emit loading state
+        send(Resource.Loading())
+        Timber.d("UserRepo: getUserById called for userId: '$userId', forceNetworkFetch: $forceNetworkFetch")
 
-        // Observe local DB for immediate data and updates
         launch {
             userDao.observeUserById(userId)
-                .distinctUntilChanged() // Only emit if data actually changes
-                .collectLatest { entity -> // Use collectLatest to cancel previous collection if new one starts
+                .distinctUntilChanged()
+                .collectLatest { entity ->
+                    Timber.d("UserRepo: DB observation for userId '$userId' emitted: ${entity?.username}")
                     send(Resource.Success(entity?.toDomain()))
-                    // If we got data from DB and not forcing network, we might consider this "good enough"
-                    // but a network fetch can update it.
                 }
         }
 
-        // Determine if network fetch is needed
-        val localUser = userDao.getUserById(userId) // Quick check for existence
-        if (forceNetworkFetch || localUser == null /* Or add staleness check here */) {
-            Timber.d("Fetching user $userId from network. Force: $forceNetworkFetch, Local found: ${localUser != null}")
+        val localUser = userDao.getUserById(userId)
+        if (forceNetworkFetch || localUser == null) {
+            Timber.d("UserRepo: Attempting network fetch for userId '$userId'.")
             try {
                 val response = userApiService.getUserById(userId)
+                Timber.i("UserRepo: API Raw Response for getUserById: Code=${response.code()}, IsSuccessful=${response.isSuccessful}, Body=${response.body()?.username}")
                 if (response.isSuccessful && response.body() != null) {
                     val userDto = response.body()!!
-                    userDao.insertUser(userDto.toEntity()) // Cache the fetched user
-                    // The Flow observing the DB will automatically emit the updated Resource.Success
-                    // No need to send(Resource.Success(userDto.toDomain())) here if DB observation is active.
+                    userDao.insertUser(userDto.toEntity())
+                    Timber.d("UserRepo: Fetched and cached user '$userId' from network.")
+                    // DB observation will emit this new user
                 } else {
-                    // If network fails but we had local data, the local data flow continues to emit.
-                    // If no local data and network fails, we need to emit an error.
-                    if (localUser == null) { // Only send error if there was no local data to show
-                        val error = parseError<PublicUserDto>(response.code(), response.errorBody()?.string())
-                        send(Resource.Error(error.message ?: "Failed to fetch user", data = null, errorCode = error.errorCode))
+                    if (localUser == null) {
+                        val errorBodyString = response.errorBody()?.string()
+                        Timber.w("UserRepo: API getUserById error and no local cache. Code: ${response.code()}, ErrorBody: $errorBodyString")
+                        val errorResource = parseError<User>(response.code(), errorBodyString)
+                        send(Resource.Error(errorResource.message ?: "Failed to fetch user", data = null, errorCode = errorResource.errorCode))
                     } else {
-                        Timber.w("Network fetch failed for user $userId, but local data exists.")
+                        Timber.w("UserRepo: Network fetch failed for user $userId, but local data exists and was emitted.")
                     }
                 }
             } catch (e: HttpException) {
-                Timber.e(e, "HttpException fetching user $userId")
+                Timber.e(e, "UserRepo: HttpException fetching user $userId")
                 if (localUser == null) {
-                    val error = parseError<PublicUserDto>(e.code(), e.response()?.errorBody()?.string())
-                    send(Resource.Error(error.message ?: "HTTP error fetching user", data = null, errorCode = error.errorCode))
+                    val errorResource = parseError<User>(e.code(), e.response()?.errorBody()?.string())
+                    send(Resource.Error(errorResource.message ?: "HTTP error fetching user", data = null, errorCode = errorResource.errorCode))
                 }
             } catch (e: IOException) {
-                Timber.e(e, "IOException fetching user $userId")
+                Timber.e(e, "UserRepo: IOException fetching user $userId")
                 if (localUser == null) {
                     send(Resource.Error("Network error fetching user.", data = null))
                 }
             } catch (e: Exception) {
-                Timber.e(e, "Unexpected error fetching user $userId")
+                Timber.e(e, "UserRepo: Unexpected error fetching user $userId")
                 if (localUser == null) {
                     send(Resource.Error("Unexpected error: ${e.localizedMessage}", data = null))
                 }
             }
-        } else if (!forceNetworkFetch) {
-            // Already emitted by the DB observation, or if it was null initially,
-            // the DB observation will emit null.
-            // No explicit Resource.Success(localUser.toDomain()) needed here if already observing DB.
-            Timber.d("User $userId found in cache, not forcing network fetch.")
+        } else {
+            Timber.d("UserRepo: User '$userId' found in cache, not forcing network fetch.")
         }
     }.flowOn(Dispatchers.IO)
 
 
-    // --- Mappers ---
     private fun PublicUserDto.toEntity(): UserEntity {
-        return UserEntity(
-            id = this.id,
-            username = this.username,
-            email = this.email,
-            createdAt = this.createdAt,
-            updatedAt = this.updatedAt
-        )
+        return UserEntity(id = this.id, username = this.username, email = this.email, createdAt = this.createdAt, updatedAt = this.updatedAt)
     }
-
     private fun UserEntity.toDomain(): User {
-        return User(
-            id = this.id,
-            username = this.username,
-            email = this.email,
-            createdAt = this.createdAt,
-            updatedAt = this.updatedAt
-        )
+        return User(id = this.id, username = this.username, email = this.email, createdAt = this.createdAt, updatedAt = this.updatedAt)
     }
-
-    private fun PublicUserDto.toDomain(): User { // Direct DTO to Domain for search results
-        return User(
-            id = this.id,
-            username = this.username,
-            email = this.email,
-            createdAt = this.createdAt,
-            updatedAt = this.updatedAt
-        )
+    private fun PublicUserDto.toDomain(): User {
+        return User(id = this.id, username = this.username, email = this.email, createdAt = this.createdAt, updatedAt = this.updatedAt)
     }
-
-    // --- Error Parsing Utility (can be common) ---
     private fun <T> parseError(errorCode: Int, errorBody: String?): Resource<T> {
         val defaultMessage = "API Error ($errorCode)"
         return try {
