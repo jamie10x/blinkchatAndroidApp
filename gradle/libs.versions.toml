@@ -7,14 +7,17 @@ kotlin = "2.1.20" # Check for latest stable Kotlin
 ksp = "2.1.20-1.0.32"
 hilt = "2.56.2" # Check for latest Hilt
 kotlinSerialization = "2.1.10" # Match your Kotlin version for the plugin
-omposeMaterial = "1.6.0"
+omposeMaterial = "1.8.2"
+
+workManager = "2.10.1"
+hiltWork = "1.2.0"
 
 
 # AndroidX & Jetpack
 coreKtx = "1.16.0"
-lifecycle = "2.9.0" # Covers runtime-ktx, viewmodel-ktx, viewmodel-compose, runtime-compose
+lifecycle = "2.9.1" # Covers runtime-ktx, viewmodel-ktx, viewmodel-compose, runtime-compose
 activityCompose = "1.10.1"
-composeBom = "2025.05.01" # Check for latest Compose Bill of Materials
+composeBom = "2025.06.00" # Check for latest Compose Bill of Materials
 navigationCompose = "2.9.0"
 hiltNavigationCompose = "1.2.0"
 
@@ -27,7 +30,7 @@ retrofitKotlinxSerializationConverter = "1.0.0"
 # Local Storage
 room = "2.7.1"
 datastorePreferences = "1.1.7"
-securityCrypto = "1.1.0-alpha07" # Or 1.0.0 for stable
+securityCrypto = "1.1.0-beta01" # Or 1.0.0 for stable
 
 # UI & Utilities
 coil = "2.7.0"
@@ -40,7 +43,6 @@ espressoCore = "3.6.1"
 mockitoKotlin = "5.4.0"
 turbine = "1.2.0"
 multidex = "2.0.1"
-# kotlinxCoroutinesTest version should match your kotlinx-coroutines-core version (derived from Kotlin version)
 
 [libraries]
 # Kotlin & Coroutines
@@ -66,6 +68,9 @@ androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-toolin
 # Navigation Compose
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 androidx-compose-material = { group = "androidx.compose.material", name = "material", version.ref = "omposeMaterial" }
+
+androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
+androidx-hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "hiltWork" }
 
 # Hilt
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }

@@ -115,6 +115,12 @@ dependencies {
     // Logging (Timber)
     implementation(libs.timber)
 
+    implementation(libs.androidx.work.runtime.ktx) // androidx.work:work-runtime-ktx
+    // For Hilt integration with WorkManager (optional but recommended for injecting dependencies into Workers)
+    implementation(libs.androidx.hilt.work)
+    // Annotation processor for Hilt-WorkManager integration
+    ksp(libs.hilt.compiler)
+
     implementation(libs.androidx.compose.material)
     // Testing
     testImplementation(libs.junit)

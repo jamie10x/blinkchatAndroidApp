@@ -6,6 +6,7 @@ import com.jamie.blinkchat.data.remote.AuthApiService
 import com.jamie.blinkchat.data.remote.interceptor.AuthInterceptor
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import com.jamie.blinkchat.data.remote.ChatApiService
+import com.jamie.blinkchat.data.remote.UserApiService
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -81,6 +82,9 @@ object NetworkModule {
         return retrofit.create(ChatApiService::class.java)
     }
 
-
-    // Add other ApiService providers here
+    @Singleton
+    @Provides
+    fun provideUserApiService(retrofit: Retrofit): UserApiService {
+        return retrofit.create(UserApiService::class.java)
+    }
 }
