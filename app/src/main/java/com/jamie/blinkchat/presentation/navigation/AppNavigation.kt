@@ -11,6 +11,7 @@ import com.jamie.blinkchat.presentation.ui.features.auth.RegisterScreen
 import com.jamie.blinkchat.presentation.ui.features.chat.ChatScreen
 import com.jamie.blinkchat.presentation.ui.features.chat_list.ChatListScreen
 import com.jamie.blinkchat.presentation.ui.features.splash.SplashScreen
+// Removed unused URLDecoder and StandardCharsets as decoding happens in ViewModel
 
 @Composable
 fun AppNavGraph(
@@ -60,9 +61,9 @@ fun AppNavGraph(
 
         composable(Screen.ChatList.route) {
             ChatListScreen(
-                onNavigateToChat = { chatId ->
-                    // We will modify this soon to pass username too
-                    navController.navigate(Screen.Chat("").createRoute(chatId))
+                onNavigateToChat = { chatId, otherUsername ->
+                    val route = Screen.Chat(chatId, otherUsername).createRoute(chatId, otherUsername)
+                    navController.navigate(route)
                 },
                 onNavigateToLogin = {
                     navController.navigate(Screen.Login.route) {
@@ -73,21 +74,18 @@ fun AppNavGraph(
             )
         }
 
-        // Updated ChatScreen composable call
         composable(
-            route = Screen.Chat("").route, // Base route definition still needs the placeholder
+            route = Screen.Chat.VagueRoute(), // Use the VagueRoute to define argument placeholders
             arguments = listOf(
-                navArgument(Screen.Chat.ARG_CHAT_ID) {
+                navArgument(Screen.Chat.ARG_CHAT_ID) { type = NavType.StringType },
+                navArgument(Screen.Chat.ARG_OTHER_USERNAME) {
                     type = NavType.StringType
-                    // nullable = true // If chatId could ever be null, but usually it's required for this screen
+                    nullable = false // Assuming username is always passed for now
                 }
-                // We will add ARG_OTHER_USERNAME here soon
             )
-        ) { backStackEntry ->
-            // The ChatScreen Composable itself will use hiltViewModel()
-            // which will use SavedStateHandle to get the chatId.
-            // We no longer need to pass chatId explicitly here.
+        ) { backStackEntry -> // backStackEntry is not directly used if ViewModel handles args
             ChatScreen(
+                // ViewModel gets arguments from SavedStateHandle
                 onNavigateBack = { navController.popBackStack() }
             )
         }
