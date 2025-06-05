@@ -5,23 +5,20 @@ import com.jamie.blinkchat.domain.model.User
 import com.jamie.blinkchat.repositories.AuthRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import timber.log.Timber
 import javax.inject.Inject
 
 class GetCurrentUserUseCase @Inject constructor(
     private val authRepository: AuthRepository
 ) {
-    operator fun invoke(): Flow<Resource<User>> = flow {
-        emit(Resource.Loading())
-        // Check if token exists first. If not, no need to call API.
-        // This basic check can be enhanced.
-        var token: String? = null
-        authRepository.observeToken().collect { token = it; return@collect }
+        operator fun invoke(): Flow<Resource<User>> = flow {
+            Timber.d("GetCurrentUserUseCase: invoked")
+            emit(Resource.Loading())
+            Timber.d("GetCurrentUserUseCase: Emitted Loading")
 
-        if (token == null) {
-            emit(Resource.Error("User not authenticated. No token found.", errorCode = 401))
-        } else {
             val result = authRepository.getCurrentUser()
+            Timber.d("GetCurrentUserUseCase: authRepository.getCurrentUser() result: $result")
             emit(result)
+            Timber.d("GetCurrentUserUseCase: Emitted final result.")
         }
-    }
 }
