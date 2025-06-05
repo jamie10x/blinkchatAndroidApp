@@ -22,9 +22,7 @@ class ChatListViewModel @Inject constructor(
     private var chatListJob: Job? = null
 
     init {
-        // Observe auth token to react to logout from other places or token expiry
         observeAuthToken()
-        // Initially load the chat list
         setIntent(ChatListContract.Intent.LoadChatList)
     }
 
@@ -41,7 +39,12 @@ class ChatListViewModel @Inject constructor(
                 loadChats(forceRefresh = true)
             }
             is ChatListContract.Intent.ChatClicked -> {
-                setEffect { ChatListContract.Effect.NavigateToChat(intent.chatId) }
+                // Find the chat item from the current state to get the username
+                val chatItem = uiState.value.chats.find { it.chatId == intent.chatId }
+                chatItem?.let {
+                    // Emit effect with otherUsername
+                    setEffect { ChatListContract.Effect.NavigateToChat(intent.chatId, it.otherParticipantUsername) }
+                } ?: Timber.e("Chat item not found for ID: ${intent.chatId} when trying to navigate.")
             }
             is ChatListContract.Intent.LogoutClicked -> {
                 logoutUser()
@@ -54,26 +57,22 @@ class ChatListViewModel @Inject constructor(
 
     private fun observeAuthToken() {
         authUseCases.observeAuthToken()
-            .distinctUntilChanged() // Only react if token presence actually changes
+            .distinctUntilChanged()
             .onEach { token ->
                 if (token == null && uiState.value.isUserLoggedIn) {
-                    // Token was cleared, likely logged out from elsewhere or expired
                     Timber.i("ChatListViewModel: Auth token cleared, navigating to login.")
-                    setState { copy(isUserLoggedIn = false, chats = emptyList()) } // Clear chats
+                    setState { copy(isUserLoggedIn = false, chats = emptyList()) }
                     setEffect { ChatListContract.Effect.NavigateToLogin }
                 } else if (token != null && !uiState.value.isUserLoggedIn) {
-                    // User logged in, perhaps reload chats if state indicates not logged in
                     setState { copy(isUserLoggedIn = true) }
-                    loadChats(forceRefresh = true) // Refresh chats on re-login
+                    loadChats(forceRefresh = true)
                 }
             }
             .launchIn(viewModelScope)
     }
 
     private fun loadChats(forceRefresh: Boolean) {
-        // Cancel any ongoing chat list loading job to avoid multiple concurrent fetches
         chatListJob?.cancel()
-
         chatListJob = chatUseCases.getChatList(forceRefresh = forceRefresh)
             .onEach { result ->
                 when (result) {
@@ -81,7 +80,6 @@ class ChatListViewModel @Inject constructor(
                         if (forceRefresh) {
                             setState { copy(isRefreshing = true, errorMessage = null) }
                         } else {
-                            // Only set global isLoading if not already refreshing and chats are empty
                             if (uiState.value.chats.isEmpty()) {
                                 setState { copy(isLoading = true, errorMessage = null) }
                             }
@@ -100,18 +98,15 @@ class ChatListViewModel @Inject constructor(
                     }
                     is Resource.Error -> {
                         Timber.w("ChatList: Error loading chats - ${result.message}")
-                        // Don't clear existing chats on refresh error, just show message
                         val currentChats = if (forceRefresh) uiState.value.chats else emptyList()
                         setState {
                             copy(
                                 isLoading = false,
                                 isRefreshing = false,
-                                chats = currentChats, // Keep existing chats on refresh error
+                                chats = currentChats,
                                 errorMessage = result.message ?: "Failed to load chats."
                             )
                         }
-                        // Optionally send a Snackbar effect for errors too
-                        // setEffect { ChatListContract.Effect.ShowErrorSnackbar(result.message ?: "Failed to load chats.") }
                     }
                 }
             }
@@ -123,18 +118,16 @@ class ChatListViewModel @Inject constructor(
             .onEach { result ->
                 when (result) {
                     is Resource.Loading -> {
-                        setState { copy(isLoading = true) } // Show loading during logout
+                        setState { copy(isLoading = true) }
                     }
                     is Resource.Success -> {
                         Timber.i("ChatListViewModel: Logout successful.")
-                        // Token observer will also trigger navigation, but explicit navigation here is fine.
-                        // State update via token observer might be slightly delayed.
                         setState { copy(isLoading = false, isUserLoggedIn = false, chats = emptyList()) }
                         setEffect { ChatListContract.Effect.NavigateToLogin }
                     }
                     is Resource.Error -> {
                         Timber.w("ChatListViewModel: Logout failed - ${result.message}")
-                        setState { copy(isLoading = false) } // Stop loading
+                        setState { copy(isLoading = false) }
                         setEffect { ChatListContract.Effect.ShowErrorSnackbar(result.message ?: "Logout failed.") }
                     }
                 }

@@ -32,7 +32,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -45,11 +44,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.jamie.blinkchat.domain.model.ChatSummaryItem
-import com.jamie.blinkchat.ui.theme.BlinkChatTheme
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -61,14 +58,13 @@ import java.util.Locale
 @Composable
 fun ChatListScreen(
     viewModel: ChatListViewModel = hiltViewModel(),
-    onNavigateToChat: (chatId: String) -> Unit,
+    onNavigateToChat: (chatId: String, otherUsername: String) -> Unit, // Lambda updated
     onNavigateToLogin: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    // For new pull-to-refresh
     val pullRefreshState = rememberPullRefreshState(
         refreshing = state.isRefreshing,
         onRefresh = { viewModel.setIntent(ChatListContract.Intent.RefreshChatList) }
@@ -78,7 +74,8 @@ fun ChatListScreen(
         viewModel.effect.collectLatest { effect ->
             when (effect) {
                 is ChatListContract.Effect.NavigateToChat -> {
-                    onNavigateToChat(effect.chatId)
+                    // Username is now directly available in the effect
+                    onNavigateToChat(effect.chatId, effect.otherUsername)
                 }
                 is ChatListContract.Effect.NavigateToLogin -> {
                     onNavigateToLogin()
@@ -112,14 +109,13 @@ fun ChatListScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .pullRefresh(pullRefreshState) // Apply pull-to-refresh modifier here
+                .pullRefresh(pullRefreshState)
         ) {
             when {
-                state.isLoading && state.chats.isEmpty() -> { // Initial loading state
+                state.isLoading && state.chats.isEmpty() -> {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
-
-                state.errorMessage != null && state.chats.isEmpty() -> { // Error state when no chats loaded
+                state.errorMessage != null && state.chats.isEmpty() -> {
                     Column(
                         modifier = Modifier.fillMaxSize().padding(16.dp),
                         verticalArrangement = Arrangement.Center,
@@ -136,25 +132,17 @@ fun ChatListScreen(
                         }
                     }
                 }
-
-                state.chats.isEmpty() && !state.isLoading -> { // Empty state (no chats, not loading, no error)
+                state.chats.isEmpty() && !state.isLoading -> {
                     Column(
                         modifier = Modifier.fillMaxSize().padding(16.dp),
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            "No chats yet.",
-                            style = MaterialTheme.typography.headlineSmall
-                        )
-                        Text(
-                            "Start a new conversation!", // Placeholder for initiating new chat
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                        Text("No chats yet.", style = MaterialTheme.typography.headlineSmall)
+                        Text("Start a new conversation!", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
-
-                else -> { // Display chat list
+                else -> {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(vertical = 8.dp)
@@ -162,7 +150,10 @@ fun ChatListScreen(
                         items(state.chats, key = { it.chatId }) { chatItem ->
                             ChatListItem(
                                 chatItem = chatItem,
-                                onClick = { viewModel.setIntent(ChatListContract.Intent.ChatClicked(chatItem.chatId)) }
+                                onClick = {
+                                    // Send intent to ViewModel; ViewModel will emit effect with username
+                                    viewModel.setIntent(ChatListContract.Intent.ChatClicked(chatItem.chatId))
+                                }
                             )
                             HorizontalDivider()
                         }
@@ -176,15 +167,14 @@ fun ChatListScreen(
                 modifier = Modifier.align(Alignment.TopCenter)
             )
 
-            // Show error as Snackbar if chats are already loaded but refresh failed
             if (state.errorMessage != null && state.chats.isNotEmpty() && !state.isLoading) {
-                LaunchedEffect(state.errorMessage) { // Show snackbar when errorMessage changes and is not null
+                LaunchedEffect(state.errorMessage) {
                     scope.launch {
                         snackbarHostState.showSnackbar(
                             message = state.errorMessage!!,
                             duration = SnackbarDuration.Short
                         )
-                        viewModel.setIntent(ChatListContract.Intent.ErrorMessageShown) // Inform VM it's shown
+                        viewModel.setIntent(ChatListContract.Intent.ErrorMessageShown)
                     }
                 }
             }
@@ -193,7 +183,7 @@ fun ChatListScreen(
 }
 
 @Composable
-fun ChatListItem(
+fun ChatListItem( // This Composable remains the same
     chatItem: ChatSummaryItem,
     onClick: () -> Unit
 ) {
@@ -204,11 +194,7 @@ fun ChatListItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Placeholder for Avatar - replace with actual Coil image loading later
-        // Box(modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape))
-
         Spacer(modifier = Modifier.width(16.dp))
-
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = chatItem.otherParticipantUsername,
@@ -230,94 +216,31 @@ fun ChatListItem(
         Column(horizontalAlignment = Alignment.End) {
             chatItem.lastMessageTimestamp?.let { timestamp ->
                 Text(
-                    text = formatTimestamp(timestamp), // Simple timestamp formatting
+                    text = formatTimestamp(timestamp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             if (chatItem.unreadCount > 0) {
                 Spacer(modifier = Modifier.height(4.dp))
-                Badge { Text(chatItem.unreadCount.toString()) } // Material 3 Badge
+                Badge { Text(chatItem.unreadCount.toString()) }
             }
         }
     }
 }
 
-// Simple timestamp formatter
-private fun formatTimestamp(timestampMillis: Long): String {
+private fun formatTimestamp(timestampMillis: Long): String { // This function remains the same
     val messageDate = Date(timestampMillis)
     val currentDate = Date()
-
     val sameDayFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
     val otherDayFormat = SimpleDateFormat("MMM d", Locale.getDefault())
-
-    // Check if the message was sent today
     val cal1 = java.util.Calendar.getInstance().apply { time = currentDate }
     val cal2 = java.util.Calendar.getInstance().apply { time = messageDate }
-
     return if (cal1.get(java.util.Calendar.YEAR) == cal2.get(java.util.Calendar.YEAR) &&
         cal1.get(java.util.Calendar.DAY_OF_YEAR) == cal2.get(java.util.Calendar.DAY_OF_YEAR)
     ) {
         sameDayFormat.format(messageDate)
     } else {
         otherDayFormat.format(messageDate)
-        // Optionally, add year if not current year:
-        val yearFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-        if (cal1.get(java.util.Calendar.YEAR) != cal2.get(java.util.Calendar.YEAR)) yearFormat.format(messageDate) else otherDayFormat.format(messageDate)
-    }
-}
-
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Preview(showBackground = true)
-@Composable
-fun ChatListScreenPreview_Loading() {
-    BlinkChatTheme {
-        val previewState = ChatListContract.State(isLoading = true, chats = emptyList())
-        // This is a simplified way to preview. For complex states, a mock VM is better.
-        Scaffold(topBar = { TopAppBar(title = {Text("BlinkChat")})}) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Preview(showBackground = true)
-@Composable
-fun ChatListScreenPreview_WithData() {
-    BlinkChatTheme {
-        val sampleChats = listOf(
-            ChatSummaryItem("1", "Alice", "You: Hey!", System.currentTimeMillis() - 100000, "read", true, 0),
-            ChatSummaryItem("2", "Bob", "See you then!", System.currentTimeMillis() - 2000000, "delivered", false, 2)
-        )
-        val previewState = ChatListContract.State(isLoading = false, chats = sampleChats)
-        Scaffold(topBar = { TopAppBar(title = {Text("BlinkChat")})}) { padding ->
-            LazyColumn(Modifier.padding(padding)) {
-                items(sampleChats) { chat -> ChatListItem(chatItem = chat, onClick = {}) }
-            }
-        }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun ChatListItemPreview() {
-    BlinkChatTheme {
-        Surface {
-            ChatListItem(
-                chatItem = ChatSummaryItem(
-                    chatId = "1",
-                    otherParticipantUsername = "John Doe",
-                    lastMessagePreview = "Okay, sounds good! Let's meet up later today then for sure.",
-                    lastMessageTimestamp = System.currentTimeMillis() - 3600000, // 1 hour ago
-                    lastMessageStatus = "read",
-                    isLastMessageFromCurrentUser = false,
-                    unreadCount = 3
-                ),
-                onClick = {}
-            )
-        }
     }
 }
