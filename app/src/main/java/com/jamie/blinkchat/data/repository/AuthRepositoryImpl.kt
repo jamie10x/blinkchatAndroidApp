@@ -67,28 +67,30 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun getCurrentUser(): Resource<User> {
+        Timber.d("AuthRepo: getCurrentUser called")
         return safeApiCall {
-            val tokenAvailable = tokenStorageService.getAuthToken().firstOrNull()?.isNotBlank() == true
-            if (!tokenAvailable) {
-                Timber.w("GetCurrentUser: No local token available. Disconnecting WebSocket if active.")
-                webSocketManager.disconnect(wasIntentional = false) // Disconnect if no token
+            Timber.d("AuthRepo: safeApiCall for getCurrentUser started")
+            val tokenValue = tokenStorageService.getAuthToken().firstOrNull() // This is a suspend call if getAuthToken() itself collects
+            Timber.d("AuthRepo: Token observed: ${if (tokenValue != null) "Exists" else "Null"}")
+
+            if (tokenValue.isNullOrBlank()) { // Changed from !tokenAvailable to isNullOrBlank for clarity
+                Timber.w("AuthRepo: No local token available for /me. Disconnecting WebSocket.")
+                webSocketManager.disconnect(wasIntentional = false)
                 return@safeApiCall Resource.Error("No authentication token found.", errorCode = 401)
             }
-
-            val response = authApiService.getCurrentUser() // Interceptor adds the token
+            Timber.d("AuthRepo: Calling AuthApiService.getCurrentUser() for /me")
+            val response = authApiService.getCurrentUser()
+            Timber.d("AuthRepo: AuthApiService.getCurrentUser() response code: ${response.code()}")
 
             if (response.isSuccessful && response.body() != null) {
-                // If /me is successful, ensure WebSocket is attempting to connect if not already
-                // This handles cases where the app starts and /me is called by SplashViewModel
-                // This is an "ensure connected" call. `connect()` has internal checks.
+                Timber.i("AuthRepo: /me call successful. User: ${response.body()?.username}")
                 webSocketManager.connect()
-                Timber.d("GetCurrentUser: Success, ensuring WebSocket is connected.")
                 Resource.Success(response.body()!!.toDomain())
             } else {
+                Timber.w("AuthRepo: /me call failed. Code: ${response.code()}. Clearing token and disconnecting WebSocket.")
                 if (response.code() == 401 || response.code() == 404) {
-                    Timber.w("GetCurrentUser: Auth error (${response.code()}). Clearing token and disconnecting WebSocket.")
                     tokenStorageService.clearAuthToken()
-                    webSocketManager.disconnect(wasIntentional = false) // Disconnect on auth error
+                    webSocketManager.disconnect(wasIntentional = false)
                 }
                 parseError(response.code(), response.errorBody()?.string())
             }

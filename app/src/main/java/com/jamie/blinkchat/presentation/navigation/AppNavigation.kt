@@ -10,8 +10,8 @@ import com.jamie.blinkchat.presentation.ui.features.auth.LoginScreen
 import com.jamie.blinkchat.presentation.ui.features.auth.RegisterScreen
 import com.jamie.blinkchat.presentation.ui.features.chat.ChatScreen
 import com.jamie.blinkchat.presentation.ui.features.chat_list.ChatListScreen
+import com.jamie.blinkchat.presentation.ui.features.search.SearchUsersScreen // Import new screen
 import com.jamie.blinkchat.presentation.ui.features.splash.SplashScreen
-// Removed unused URLDecoder and StandardCharsets as decoding happens in ViewModel
 
 @Composable
 fun AppNavGraph(
@@ -72,24 +72,44 @@ fun AppNavGraph(
                     }
                 }
             )
+            {
+                navController.navigate(Screen.SearchUsers.route)
+            }
+        }
+
+        // New Composable for SearchUsersScreen
+        composable(Screen.SearchUsers.route) {
+            SearchUsersScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onNavigateToChat = { receiverId, username ->
+                    // Use the createNewChatRoute for initiating a chat
+                    val route = Screen.Chat("", "").createNewChatRoute(receiverId, username)
+                    navController.navigate(route) {
+                        // Optionally pop SearchUsersScreen off the back stack
+                        // popUpTo(Screen.SearchUsers.route) { inclusive = true }
+                    }
+                }
+            )
         }
 
         composable(
-            route = Screen.Chat.VagueRoute(), // Use the VagueRoute to define argument placeholders
+            route = Screen.Chat.VagueRoute(),
             arguments = listOf(
                 navArgument(Screen.Chat.ARG_CHAT_ID) { type = NavType.StringType },
-                navArgument(Screen.Chat.ARG_OTHER_USERNAME) {
+                navArgument(Screen.Chat.ARG_OTHER_USERNAME) { type = NavType.StringType },
+                // Add receiverId as an optional argument for new chats
+                navArgument(Screen.Chat.ARG_RECEIVER_ID) {
                     type = NavType.StringType
-                    nullable = false // Assuming username is always passed for now
+                    nullable = true // Can be null if opening an existing chat
+                    defaultValue = null
                 }
             )
-        ) { backStackEntry -> // backStackEntry is not directly used if ViewModel handles args
+        ) { // backStackEntry is not directly used if ViewModel handles args
             ChatScreen(
-                // ViewModel gets arguments from SavedStateHandle
                 onNavigateBack = { navController.popBackStack() }
             )
         }
-
-        // composable(Screen.Settings.route) { /* SettingsScreen(...) */ }
     }
 }

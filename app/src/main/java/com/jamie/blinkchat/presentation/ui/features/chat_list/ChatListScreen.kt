@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
@@ -24,6 +25,7 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,27 +46,28 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.jamie.blinkchat.domain.model.ChatSummaryItem
+import com.jamie.blinkchat.ui.theme.BlinkChatTheme
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
 fun ChatListScreen(
     viewModel: ChatListViewModel = hiltViewModel(),
-    onNavigateToChat: (chatId: String, otherUsername: String) -> Unit, // Lambda updated
-    onNavigateToLogin: () -> Unit
+    onNavigateToChat: (chatId: String, otherUsername: String) -> Unit,
+    onNavigateToLogin: () -> Unit,
+    onNavigateToSearch: () -> Unit // New navigation callback
 ) {
     val state by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-
     val pullRefreshState = rememberPullRefreshState(
         refreshing = state.isRefreshing,
         onRefresh = { viewModel.setIntent(ChatListContract.Intent.RefreshChatList) }
@@ -74,7 +77,6 @@ fun ChatListScreen(
         viewModel.effect.collectLatest { effect ->
             when (effect) {
                 is ChatListContract.Effect.NavigateToChat -> {
-                    // Username is now directly available in the effect
                     onNavigateToChat(effect.chatId, effect.otherUsername)
                 }
                 is ChatListContract.Effect.NavigateToLogin -> {
@@ -103,6 +105,11 @@ fun ChatListScreen(
                 }
             )
         },
+        floatingActionButton = {
+            FloatingActionButton(onClick = onNavigateToSearch) {
+                Icon(Icons.Filled.Add, contentDescription = "Search Users / New Chat")
+            }
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Box(
@@ -111,6 +118,7 @@ fun ChatListScreen(
                 .padding(paddingValues)
                 .pullRefresh(pullRefreshState)
         ) {
+            // ... (when block for loading/error/empty/list content remains the same as previous full version)
             when {
                 state.isLoading && state.chats.isEmpty() -> {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
@@ -151,7 +159,6 @@ fun ChatListScreen(
                             ChatListItem(
                                 chatItem = chatItem,
                                 onClick = {
-                                    // Send intent to ViewModel; ViewModel will emit effect with username
                                     viewModel.setIntent(ChatListContract.Intent.ChatClicked(chatItem.chatId))
                                 }
                             )
@@ -182,8 +189,9 @@ fun ChatListScreen(
     }
 }
 
+// ChatListItem, formatTimestamp, and Previews remain the same as the last full version
 @Composable
-fun ChatListItem( // This Composable remains the same
+fun ChatListItem(
     chatItem: ChatSummaryItem,
     onClick: () -> Unit
 ) {
@@ -229,7 +237,7 @@ fun ChatListItem( // This Composable remains the same
     }
 }
 
-private fun formatTimestamp(timestampMillis: Long): String { // This function remains the same
+private fun formatTimestamp(timestampMillis: Long): String {
     val messageDate = Date(timestampMillis)
     val currentDate = Date()
     val sameDayFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
@@ -242,5 +250,13 @@ private fun formatTimestamp(timestampMillis: Long): String { // This function re
         sameDayFormat.format(messageDate)
     } else {
         otherDayFormat.format(messageDate)
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun ChatListScreenPreview_Empty() {
+    BlinkChatTheme {
+        ChatListScreen(onNavigateToChat = { _, _ -> }, onNavigateToLogin = {}, onNavigateToSearch = {})
     }
 }
