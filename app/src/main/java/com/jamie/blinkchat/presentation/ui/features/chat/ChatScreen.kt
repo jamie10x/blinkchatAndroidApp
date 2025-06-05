@@ -2,7 +2,21 @@ package com.jamie.blinkchat.presentation.ui.features.chat
 
 import android.annotation.SuppressLint
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -13,17 +27,39 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Done
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.surfaceColorAtElevation
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -31,6 +67,9 @@ import com.jamie.blinkchat.domain.model.Message
 import com.jamie.blinkchat.ui.theme.BlinkChatTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.text.SimpleDateFormat
@@ -40,7 +79,6 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ChatScreen(
-    // chatId is now handled by ViewModel via SavedStateHandle
     viewModel: ChatViewModel = hiltViewModel(),
     onNavigateBack: () -> Unit
 ) {
@@ -48,10 +86,7 @@ fun ChatScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val lazyListState = rememberLazyListState()
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
 
-    // Effect collection for navigation, snackbars, scrolling
     LaunchedEffect(key1 = Unit) {
         viewModel.effect.collectLatest { effect ->
             when (effect) {
@@ -60,12 +95,9 @@ fun ChatScreen(
                         snackbarHostState.showSnackbar(effect.message, duration = SnackbarDuration.Short)
                     }
                 }
-                is ChatContract.Effect.MessageSentSuccessfully -> {
-                    // Input field is cleared by ViewModel state update
-                }
+                is ChatContract.Effect.MessageSentSuccessfully -> { /* Input field cleared by VM */ }
                 is ChatContract.Effect.ScrollToBottom -> {
                     if (state.messages.isNotEmpty()) {
-                        // Delay slightly to allow new item to render before scrolling
                         scope.launch {
                             delay(100)
                             lazyListState.animateScrollToItem(state.messages.size - 1)
@@ -76,45 +108,79 @@ fun ChatScreen(
         }
     }
 
-    // Trigger loading older messages when scrolling near the top
-    LaunchedEffect(lazyListState) {
+    // Trigger loading older messages
+    LaunchedEffect(lazyListState, state.canLoadMoreOlderMessages, state.isLoadingOlderMessages) {
         snapshotFlow { lazyListState.firstVisibleItemIndex }
-            .collect { firstVisibleIndex ->
-                if (firstVisibleIndex < 3 && state.messages.isNotEmpty() && state.canLoadMoreOlderMessages && !state.isLoadingOlderMessages) {
-                    Timber.d("ChatScreen: Reached top, loading older messages.")
-                    viewModel.setIntent(ChatContract.Intent.LoadOlderMessages)
-                }
+            .filter { index ->
+                index < 3 &&
+                        state.messages.isNotEmpty() &&
+                        state.canLoadMoreOlderMessages &&
+                        !state.isLoadingOlderMessages
+            }
+            .distinctUntilChanged()
+            .collect {
+                Timber.d("ChatScreen: Reached top (index $it), loading older messages.")
+                viewModel.setIntent(ChatContract.Intent.LoadOlderMessages)
             }
     }
 
-    // When new messages arrive and we are near the bottom, scroll down.
-    LaunchedEffect(state.messages.size) {
+    // Auto-scroll for new messages
+    LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.id) {
         if (state.messages.isNotEmpty()) {
-            val lastVisibleItemIndex = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            // If the last few items are visible or it's a new message from current user
-            if ( (state.messages.size - lastVisibleItemIndex < 5) ||
-                (state.messages.lastOrNull()?.isFromCurrentUser == true && state.messages.lastOrNull()?.isOptimistic == true) ) {
+            val lastMessage = state.messages.last()
+            val lastVisibleItem = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()
+            val isNearBottom = lastVisibleItem != null && (state.messages.size - 1 - lastVisibleItem.index) < 3
+            val isOwnOptimisticMessage = lastMessage.isFromCurrentUser && lastMessage.isOptimistic
+
+            if (isOwnOptimisticMessage || isNearBottom) {
                 scope.launch {
-                    delay(100) // allow layout
+                    delay(100)
                     lazyListState.animateScrollToItem(state.messages.size - 1)
                 }
             }
         }
     }
 
+    // LaunchedEffect for Read Receipts
+    LaunchedEffect(remember { derivedStateOf { lazyListState.layoutInfo } }, state.messages, state.currentUserId) {
+        snapshotFlow { lazyListState.layoutInfo }
+            .map { layoutInfo ->
+                layoutInfo.visibleItemsInfo
+                    .mapNotNull { itemInfo ->
+                        if (itemInfo.index >= 0 && itemInfo.index < state.messages.size) {
+                            state.messages[itemInfo.index]
+                        } else {
+                            null
+                        }
+                    }
+                    .filter { message ->
+                        state.currentUserId != null &&
+                                message.senderId != state.currentUserId &&
+                                message.status != Message.STATUS_READ &&
+                                !message.isOptimistic
+                    }
+                    .map { it.id }
+            }
+            .distinctUntilChanged()
+            .filter { it.isNotEmpty() }
+            .collectLatest { unreadVisibleMessageIds ->
+                Timber.d("Visible unread messages from others: $unreadVisibleMessageIds to mark as READ")
+                viewModel.setIntent(ChatContract.Intent.MessagesDisplayed(unreadVisibleMessageIds))
+            }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(state.otherParticipantUsername ?: state.chatId ?: "Chat") },
+                title = { Text(state.otherParticipantUsername ?: state.chatId ?: "Chat", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    if (state.isOtherUserTyping) { // Placeholder for typing indicator
-                        Text("Typing...", fontStyle = FontStyle.Italic, modifier = Modifier.padding(end = 8.dp))
+                    if (state.isOtherUserTyping) {
+                        Text("Typing...", fontStyle = FontStyle.Italic, modifier = Modifier.padding(end = 12.dp))
                     }
                 }
             )
@@ -126,13 +192,15 @@ fun ChatScreen(
                 onTextChanged = { viewModel.setIntent(ChatContract.Intent.InputTextChanged(it)) },
                 onSendClicked = { viewModel.setIntent(ChatContract.Intent.SendMessageClicked) },
                 isConnected = state.isConnected,
-                modifier = Modifier
-                    .imePadding() // Handles IME padding automatically
-                    .navigationBarsPadding() // Add padding for navigation bar if needed
+                modifier = Modifier.imePadding()
             )
         }
     ) { paddingValues ->
-        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) {
             when {
                 state.isLoadingMessages && state.messages.isEmpty() -> {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
@@ -143,25 +211,18 @@ fun ChatScreen(
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(state.loadMessagesError!!, color = MaterialTheme.colorScheme.error)
+                        Text(state.loadMessagesError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyLarge)
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(onClick = { viewModel.setIntent(ChatContract.Intent.RetryLoadMessages) }) {
                             Text("Retry")
                         }
                     }
                 }
-                // No need for "empty chats" state as a chat screen implies a chat exists.
-                // If messages list is empty after load, it just shows an empty list.
                 else -> {
                     LazyColumn(
                         state = lazyListState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-                        reverseLayout = false // Keep true if you want input at bottom and messages growing up
-                        // Set to false if input is at bottom and messages also appear from top down.
-                        // For typical chat apps, reverseLayout = true is common when new messages appear at the bottom.
-                        // Let's adjust this if needed after seeing behavior.
-                        // For now: false, and we scroll to bottom.
                     ) {
                         if (state.isLoadingOlderMessages && state.canLoadMoreOlderMessages) {
                             item {
@@ -170,18 +231,38 @@ fun ChatScreen(
                                 }
                             }
                         }
-
-                        itemsIndexed(state.messages, key = { _, message -> message.id }) { index, message ->
+                        itemsIndexed(state.messages, key = { _, message -> message.clientTempId ?: message.id }) { index, message ->
                             val showDateHeader = index == 0 || isDifferentDay(state.messages.getOrNull(index - 1)?.timestamp, message.timestamp)
                             if (showDateHeader) {
                                 DateHeader(timestamp = message.timestamp)
                             }
                             MessageBubble(
                                 message = message,
-                                // Corrected: Use the pre-calculated field from the domain model
                                 isFromCurrentUser = message.isFromCurrentUser
                             )
                         }
+                    }
+                }
+            }
+
+            if (state.sendMessageError != null) {
+                LaunchedEffect(state.sendMessageError) {
+                    scope.launch {
+                        snackbarHostState.showSnackbar(
+                            message = state.sendMessageError!!,
+                            duration = SnackbarDuration.Short
+                        )
+                        viewModel.setIntent(ChatContract.Intent.ClearSendMessageError)
+                    }
+                }
+            } else if (state.loadMessagesError != null && state.messages.isNotEmpty()) {
+                LaunchedEffect(state.loadMessagesError) {
+                    scope.launch {
+                        snackbarHostState.showSnackbar(
+                            message = state.loadMessagesError!!,
+                            duration = SnackbarDuration.Short
+                        )
+                        viewModel.setIntent(ChatContract.Intent.ClearLoadMessagesError)
                     }
                 }
             }
@@ -199,39 +280,42 @@ fun MessageInputBar(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shadowElevation = 4.dp, // Or tonalElevation for M3
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f) // Slight transparency or distinct color
+        shadowElevation = 4.dp,
+        color = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp)
     ) {
         Row(
-            modifier = Modifier
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.Bottom
         ) {
             OutlinedTextField(
                 value = text,
                 onValueChange = onTextChanged,
                 modifier = Modifier.weight(1f),
-                placeholder = { Text(if (isConnected) "Type a message..." else "Connecting...") },
+                placeholder = { Text(if (isConnected) "Message..." else "Connecting...") },
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.Sentences,
                     imeAction = ImeAction.Send
                 ),
-                keyboardActions = KeyboardActions(onSend = { if (text.isNotBlank() && isConnected) onSendClicked() }),
-                maxLines = 5, // Allow multi-line input
-                shape = RoundedCornerShape(24.dp), // Rounded corners
-                colors = OutlinedTextFieldDefaults.colors( // M3 OutlinedTextFieldDefaults
+                keyboardActions = KeyboardActions(onSend = {
+                    if (text.isNotBlank() && isConnected) onSendClicked()
+                }),
+                maxLines = 5,
+                shape = RoundedCornerShape(24.dp),
+                colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                )
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                    cursorColor = MaterialTheme.colorScheme.primary
+                ),
             )
             Spacer(modifier = Modifier.width(8.dp))
             IconButton(
                 onClick = onSendClicked,
                 enabled = text.isNotBlank() && isConnected,
-                colors = IconButtonDefaults.iconButtonColors(
+                modifier = Modifier.size(48.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
-                    disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                    disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
                     disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                 )
             ) {
@@ -244,20 +328,28 @@ fun MessageInputBar(
 @SuppressLint("ConfigurationScreenWidthHeight")
 @Composable
 fun MessageBubble(message: Message, isFromCurrentUser: Boolean) {
-    val bubbleColor = if (isFromCurrentUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
-    val textColor = if (isFromCurrentUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
-    val alignment = if (isFromCurrentUser) Alignment.CenterEnd else Alignment.CenterStart
-    val bubbleShape = if (isFromCurrentUser) {
-        RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
-    } else {
-        RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
-    }
+    val bubbleColor = if (isFromCurrentUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer
+    val textColor = if (isFromCurrentUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer
+    // This outer alignment determines if the whole bubble+status column is to the left or right
+    val columnHorizontalAlignment = if (isFromCurrentUser) Alignment.End else Alignment.Start
+
+    val bubbleShape = RoundedCornerShape(
+        topStart = if (isFromCurrentUser) 16.dp else 4.dp,
+        topEnd = if (isFromCurrentUser) 4.dp else 16.dp,
+        bottomStart = 16.dp,
+        bottomEnd = 16.dp
+    )
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalAlignment = alignment as Alignment.Horizontal
+            .padding(
+                start = if (isFromCurrentUser) 48.dp else 8.dp, // Less indent for other user, more for self
+                end = if (isFromCurrentUser) 8.dp else 48.dp,   // Less indent for self, more for other user
+                top = 4.dp,
+                bottom = 4.dp
+            ),
+        horizontalAlignment = columnHorizontalAlignment // This aligns the Box and Row below it
     ) {
         Box(
             modifier = Modifier
@@ -265,27 +357,22 @@ fun MessageBubble(message: Message, isFromCurrentUser: Boolean) {
                 .clip(bubbleShape)
                 .background(bubbleColor)
                 .padding(horizontal = 12.dp, vertical = 8.dp)
+            // The content within this Box (the Text) will naturally align start due to Box's default
         ) {
-            Column {
-                // If not from current user and group messages by same sender, show username
-                // if (!isFromCurrentUser) {
-                //    Text(message.senderUsername ?: "Unknown", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = textColor.copy(alpha = 0.7f))
-                // }
-                Text(text = message.content, style = MaterialTheme.typography.bodyLarge, color = textColor)
-            }
+            Text(text = message.content, style = MaterialTheme.typography.bodyLarge, color = textColor)
         }
         Row(
-            modifier = Modifier.padding(start = if (!isFromCurrentUser) 8.dp else 0.dp, end = if (isFromCurrentUser) 8.dp else 0.dp, top = 2.dp),
+            modifier = Modifier.padding(top = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (message.isOptimistic) {
+            if (message.isOptimistic && message.status == Message.STATUS_SENDING) {
                 Text(
                     "Sending...",
                     style = MaterialTheme.typography.labelSmall,
                     fontStyle = FontStyle.Italic,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            } else {
+            } else if (!message.isOptimistic) {
                 Text(
                     text = formatMessageTimestamp(message.timestamp),
                     style = MaterialTheme.typography.labelSmall,
@@ -300,15 +387,16 @@ fun MessageBubble(message: Message, isFromCurrentUser: Boolean) {
     }
 }
 
+
 @Composable
 fun MessageStatusIcon(status: String) {
     val icon = when (status) {
         Message.STATUS_SENT -> Icons.Filled.Done
-        Message.STATUS_DELIVERED -> Icons.Filled.Done // Double tick
-        Message.STATUS_READ -> Icons.Filled.Done // Double tick, colored for read
-        else -> null // Or a clock icon for "sending" if not handled by text
+        Message.STATUS_DELIVERED -> Icons.Filled.Done
+        Message.STATUS_READ -> Icons.Filled.Done
+        else -> null
     }
-    val iconColor = if (status == Message.STATUS_READ) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    val iconColor = if (status == Message.STATUS_READ) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
 
     icon?.let {
         Icon(
@@ -323,11 +411,11 @@ fun MessageStatusIcon(status: String) {
 
 @Composable
 fun DateHeader(timestamp: Long) {
-    val formatter = SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()) // e.g., June 3, 2025
+    val formatter = SimpleDateFormat("MMMM d, yyyy", Locale.getDefault())
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 16.dp),
+            .padding(vertical = 16.dp, horizontal = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -335,8 +423,8 @@ fun DateHeader(timestamp: Long) {
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
-                .background(MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp), RoundedCornerShape(8.dp))
-                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 10.dp, vertical = 4.dp)
         )
     }
 }
@@ -353,35 +441,61 @@ private fun formatMessageTimestamp(timestampMillis: Long): String {
     return SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(timestampMillis))
 }
 
-
+// --- Previews ---
 @Preview(showBackground = true, device = "id:pixel_5")
 @Composable
-fun ChatScreenPreview() {
+fun ChatScreenPreview_Empty() {
     BlinkChatTheme {
-        // This preview will be very basic as it doesn't have a real ViewModel or chatId.
-        // More comprehensive previews would mock the ViewModel state.
         ChatScreen(onNavigateBack = {})
     }
 }
 
-@Preview
+@Preview(showBackground = true)
 @Composable
 fun MessageBubbleCurrentUserPreview() {
     BlinkChatTheme {
-        MessageBubble(
-            message = Message("1", "c1", "u1", "Jamie", "Hello there!", System.currentTimeMillis(), Message.STATUS_READ, true, isOptimistic = false),
-            isFromCurrentUser = true
-        )
+        Surface(color = MaterialTheme.colorScheme.background) {
+            MessageBubble(
+                message = Message("1", "c1", "u1", "Jamie", "Hello there, this is a bit of a longer message to see how it wraps!", System.currentTimeMillis(), Message.STATUS_READ, true, isOptimistic = false),
+                isFromCurrentUser = true
+            )
+        }
     }
 }
 
-@Preview
+@Preview(showBackground = true)
 @Composable
 fun MessageBubbleOtherUserPreview() {
     BlinkChatTheme {
-        MessageBubble(
-            message = Message("2", "c1", "u2", "Alex", "Hi Jamie! How are you?", System.currentTimeMillis() - 5000, Message.STATUS_DELIVERED, false, isOptimistic = false),
-            isFromCurrentUser = false
-        )
+        Surface(color = MaterialTheme.colorScheme.background) {
+            MessageBubble(
+                message = Message("2", "c1", "u2", "Alex", "Hi Jamie! How are you today? Hope you're doing well.", System.currentTimeMillis() - 5000, Message.STATUS_DELIVERED, false, isOptimistic = false),
+                isFromCurrentUser = false
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun MessageInputBarPreview() {
+    BlinkChatTheme {
+        MessageInputBar(text = "Hello", onTextChanged = {}, onSendClicked = {}, isConnected = true)
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun MessageInputBarDisconnectedPreview() {
+    BlinkChatTheme {
+        MessageInputBar(text = "", onTextChanged = {}, onSendClicked = {}, isConnected = false)
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun DateHeaderPreview(){
+    BlinkChatTheme{
+        DateHeader(timestamp = System.currentTimeMillis())
     }
 }
