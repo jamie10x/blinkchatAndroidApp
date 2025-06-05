@@ -43,18 +43,21 @@ class TokenStorageServiceImpl @Inject constructor(
     }
 
     override fun getAuthToken(): Flow<String?> {
+        Timber.d("getAuthToken() called from DataStore")
         return context.dataStore.data
             .catch { exception ->
-                // IOException means an error while reading data
                 if (exception is IOException) {
                     Timber.e(exception, "Error reading auth token from DataStore.")
-                    emit(emptyPreferences()) // Emit empty preferences on error
+                    emit(emptyPreferences())
                 } else {
-                    throw exception // Rethrow other exceptions
+                    Timber.e(exception, "Non-IO exception reading token from DataStore.")
+                    throw exception
                 }
             }
             .map { preferences ->
-                preferences[PreferencesKeys.AUTH_TOKEN] // Returns null if key doesn't exist
+                val token = preferences[PreferencesKeys.AUTH_TOKEN]
+                Timber.d("DataStore emitted token: ${if (token != null) "Exists" else "Null"}")
+                token
             }
     }
 
